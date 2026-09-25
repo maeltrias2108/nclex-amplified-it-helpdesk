@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function owns(resource) { return signedIn() && resource.data.owner == request.auth.token.email; }
+
+    match /students/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow update: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+    }
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /articles/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false);
+      allow create, update, delete: if isAdmin();
+    }
+    match /faqs/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false);
+      allow create, update, delete: if isAdmin();
+    }
+    match /announcements/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false && resource.data.publishedAt <= request.time);
+      allow create, update, delete: if isAdmin();
+    }
+    match /tickets/{id} {
+      allow create: if signedIn() && request.resource.data.owner == request.auth.token.email;
+      allow read: if isAdmin() || owns(resource);
+      allow update: if isAdmin() && request.resource.data.status in ['Pending', 'In Progress', 'Resolved', 'Closed'];
+      allow delete: if isAdmin();
+    }
+    match /ticketMessages/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
+      allow create: if signedIn() && (isAdmin() || (request.resource.data.owner == request.auth.token.email && get(/databases/$(database)/documents/tickets/$(request.resource.data.ticketId)).data.owner == request.auth.token.email));
+      allow update, delete: if isAdmin();
+    }
+    match /ticketStatus/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /notifications/{id} {
+      allow read, update: if signedIn() && resource.data.owner == request.auth.token.email;
+      allow create: if isAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
+    }
+  }
+}
