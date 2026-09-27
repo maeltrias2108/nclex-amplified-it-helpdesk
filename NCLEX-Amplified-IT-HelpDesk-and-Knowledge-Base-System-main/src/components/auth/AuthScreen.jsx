@@ -75,9 +75,14 @@ export function AuthScreen({ view, setView, onLogin, students = [] }) {
         }
 
         if (isRegister) {
-          await firebaseRegister(form.name.trim(), email, form.password);
+          const registration = await firebaseRegister(form.name.trim(), email, form.password);
           setView('student-login');
-          setMessage({ type: 'success', text: 'Account created! Please verify your email before signing in.' });
+          setMessage({
+            type: 'success',
+            text: registration.resent
+              ? 'This account is not verified yet. A new verification email has been sent.'
+              : 'Account created! Please verify your email before signing in. Submit registration again with the same email and password to resend the verification email.'
+          });
           return;
         }
 
@@ -89,7 +94,7 @@ export function AuthScreen({ view, setView, onLogin, students = [] }) {
           throw new Error('This is an administrator account. Please use the Administrator Login.');
         }
 
-        onLogin(account.role, account.name, account.email, account.verified);
+        onLogin(account.role, account.name, account.email, account.verified, account);
         return;
       }
 

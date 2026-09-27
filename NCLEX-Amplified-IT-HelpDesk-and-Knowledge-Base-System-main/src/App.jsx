@@ -9,10 +9,11 @@ import {
 import {
   firebaseConfigured,
   firebaseListContent,
-  firebaseListStudents,
+  firebaseSubscribeStudents,
   firebaseCreateContent,
   firebaseUpdateContent,
   firebaseDeleteContent,
+  firebaseSyncStudentProfile,
   firebaseLogout,
   firebaseErrorMessage
 } from './firebase';
@@ -231,18 +232,56 @@ export function App() {
         });
       });
 
-    if (session.role === 'admin') {
-      firebaseListStudents()
-        .then((students) => {
-          if (active && students.length) {
-            setData((current) => ({ ...current, students }));
-          }
-        })
-        .catch(() => notify('Student accounts could not be synchronized from Firebase.', 'error'));
+    const unsubscribeStudents = session.role === 'admin'
+      ? firebaseSubscribeStudents(
+        (students) => {
+          if (active) setData((current) => ({ ...current, students }));
+        },
+        () => {
+          if (active) notify('Student accounts could not be synchronized from Firebase.', 'error');
+        }
+      )
+      : null;
+
+    const syncStudentProfile = async () => {
+      try {
+        const profile = await firebaseSyncStudentProfile();
+        if (!active || !profile) return;
+        setSession((current) => {
+          if (!current || current.role !== 'student') return current;
+          const next = {
+            ...current,
+            name: profile.name || current.name,
+            email: profile.email || current.email,
+            verified: profile.verified,
+            phone: profile.phone || '',
+            address: profile.address || ''
+          };
+          writeStore('nclex-session', next);
+          return next;
+        });
+        setData((current) => ({
+          ...current,
+          students: current.students.map((student) =>
+            student.id === profile.id || student.email?.toLowerCase() === session.email.toLowerCase()
+              ? { ...student, ...profile }
+              : student
+          )
+        }));
+      } catch (error) {
+        if (active) notify(`Student profile could not be synchronized: ${firebaseErrorMessage(error)}`, 'error');
+      }
+    };
+
+    if (session.role === 'student') {
+      syncStudentProfile();
+      window.addEventListener('focus', syncStudentProfile);
     }
 
     return () => {
       active = false;
+      unsubscribeStudents?.();
+      if (session.role === 'student') window.removeEventListener('focus', syncStudentProfile);
     };
   }, [session?.role]);
 
@@ -252,8 +291,14 @@ export function App() {
     setData((current) => ({ ...current, [key]: value }));
   };
 
-  const login = (role, name, email, verified = true) => {
-    const nextSession = { role, name, email, verified };
+  const login = (role, name, email, verified = true, profile = {}) => {
+    const nextSession = {
+      role,
+      name,
+      email,
+      verified,
+      ...(role === 'student' ? { phone: profile.phone || '', address: profile.address || '' } : {})
+    };
     setSession(nextSession);
     writeStore('nclex-session', nextSession);
 

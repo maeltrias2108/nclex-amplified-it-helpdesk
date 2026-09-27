@@ -5,6 +5,7 @@ import { SearchBox } from '../../components/common/SearchBox';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { fmt, initials } from '../../data/seed';
+import { firebaseConfigured, firebaseDeleteStudentProfile, firebaseErrorMessage, firebaseSetStudentActive } from '../../firebase';
 
 export function AdminStudents({ data, updateData, notify }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -15,25 +16,47 @@ export function AdminStudents({ data, updateData, notify }) {
     return searchString.includes(searchTerm.toLowerCase());
   });
 
-  const handleExecuteAction = () => {
+  const handleExecuteAction = async () => {
     if (!pendingAction) return;
     const { student, action } = pendingAction;
 
     if (action === 'delete') {
-      const updated = data.students.filter((s) => s.id !== student.id);
-      updateData('students', updated);
+      try {
+        if (firebaseConfigured) {
+          await firebaseDeleteStudentProfile(student.id);
+        } else {
+          updateData('students', data.students.filter((s) => s.id !== student.id));
+        }
+      } catch (error) {
+        notify(firebaseErrorMessage(error), 'error');
+        return;
+      }
       notify(`Student account for "${student.name}" was deleted. Ticket history retained.`);
     } else if (action === 'deactivate') {
-      const updated = data.students.map((s) =>
-        s.id === student.id ? { ...s, active: false } : s
-      );
-      updateData('students', updated);
+      try {
+        if (firebaseConfigured) await firebaseSetStudentActive(student.id, false);
+        if (!firebaseConfigured) {
+          updateData('students', data.students.map((s) =>
+            s.id === student.id ? { ...s, active: false } : s
+          ));
+        }
+      } catch (error) {
+        notify(firebaseErrorMessage(error), 'error');
+        return;
+      }
       notify(`Student account for "${student.name}" was deactivated.`);
     } else if (action === 'reactivate') {
-      const updated = data.students.map((s) =>
-        s.id === student.id ? { ...s, active: true } : s
-      );
-      updateData('students', updated);
+      try {
+        if (firebaseConfigured) await firebaseSetStudentActive(student.id, true);
+        if (!firebaseConfigured) {
+          updateData('students', data.students.map((s) =>
+            s.id === student.id ? { ...s, active: true } : s
+          ));
+        }
+      } catch (error) {
+        notify(firebaseErrorMessage(error), 'error');
+        return;
+      }
       notify(`Student account for "${student.name}" was reactivated.`);
     }
 
@@ -146,7 +169,9 @@ export function AdminStudents({ data, updateData, notify }) {
           }
           text={
             pendingAction.action === 'delete'
-              ? 'This action removes the student profile from user management. All past ticket conversations will be retained for audit purposes.'
+              ? firebaseConfigured
+                ? 'This deletes the student Firestore profile. Their Firebase sign-in remains, but they will not be able to access the portal. All ticket conversations will be retained.'
+                : 'This removes the student from the local demo directory. All past ticket conversations will be retained for audit purposes.'
               : pendingAction.action === 'deactivate'
               ? 'This will prevent the student from logging into the portal until an administrator reactivates their account.'
               : 'This restores immediate portal access for the student.'

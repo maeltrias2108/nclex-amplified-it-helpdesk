@@ -5,50 +5,185 @@ service cloud.firestore {
     function isAdmin() {
       return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-    function owns(resource) { return signedIn() && resource.data.owner == request.auth.token.email; }
+    function isActiveStudent(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && exists(/databases/$(database)/documents/students/$(uid))
+        && get(/databases/$(database)/documents/students/$(uid)).data.active == true;
+    }
+    function owns(resource) {
+      return signedIn()
+        && isActiveStudent(request.auth.uid)
+        && resource.data.owner == request.auth.token.email;
+    }
+    function canCreateStudentProfile(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && !exists(/databases/$(database)/documents/deletedStudentAccounts/$(uid))
+        && request.resource.data.keys().hasAll(['name', 'email', 'verified', 'active', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['name', 'email', 'verified', 'active', 'createdAt', 'updatedAt', 'phone', 'address'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 200
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.verified == false
+        && request.resource.data.active == true
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 32))
+        && (!('address' in request.resource.data) || (request.resource.data.address is string && request.resource.data.address.size() <= 1000));
+    }
+    function canUpdateStudentProfile(uid) {
+      let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
+      return isActiveStudent(uid)
+        && changedKeys.hasOnly(['name', 'email', 'verified', 'active', 'phone', 'address', 'updatedAt'])
+        && resource.data.get('active', false) == true
+        && request.resource.data.get('active', false) in [true, false]
+        && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 200
+        && (request.resource.data.get('email', request.auth.token.email) == resource.data.get('email', request.auth.token.email)
+          || request.resource.data.get('email', request.auth.token.email) == request.auth.token.email)
+        && (request.resource.data.get('verified', false) == resource.data.get('verified', false)
+          || request.resource.data.get('verified', false) == request.auth.token.email_verified)
+        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 32))
+        && (!('address' in request.resource.data) || (request.resource.data.address is string && request.resource.data.address.size() <= 1000))
+        && request.resource.data.updatedAt == request.time;
+    }
+    function canCreateTicket(ticketId) {
+      let ticket = request.resource.data;
+      let studentPath = /databases/$(database)/documents/students/$(request.auth.uid);
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && exists(studentPath)
+        && get(studentPath).data.active == true
+        && ticket.keys().hasAll(['id', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory'])
+        && ticket.keys().hasOnly(['id', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory'])
+        && ticket.id == ticketId
+        && ticket.owner == request.auth.token.email
+        && ticket.ownerName == get(studentPath).data.name
+        && ticket.subject is string
+        && ticket.subject.size() >= 5
+        && ticket.subject.size() <= 120
+        && ticket.category in ['Account & Dashboard Access', 'Studium CAT & QBanks', 'Learning Materials & Handouts', 'Classes & Zoom', 'Video & Playback Issues', 'Website, Browser & Network Issues', 'Forms & File Uploads', 'NCLEX Registration & External Platforms', 'Pricing & Subscriptions', 'Email & Communication', 'General Inquiries & Technical Support']
+        && ticket.priority in ['Low', 'Normal', 'High']
+        && ticket.description is string
+        && ticket.description.size() >= 15
+        && ticket.description.size() <= 4000
+        && ticket.platform is string
+        && ticket.platform.size() <= 200
+        && ticket.attachment == null
+        && ticket.attachments is list
+        && ticket.attachments.size() == 0
+        && ticket.status == 'Pending'
+        && ticket.assignee == 'Support Desk Queue'
+        && ticket.createdAt == request.time
+        && ticket.updatedAt == request.time
+        && ticket.statusHistory is list
+        && ticket.statusHistory.size() == 1
+        && ticket.statusHistory[0] is map
+        && ticket.statusHistory[0].keys().hasAll(['from', 'to', 'changedAt', 'changedBy'])
+        && ticket.statusHistory[0].keys().hasOnly(['from', 'to', 'changedAt', 'changedBy'])
+        && ticket.statusHistory[0].from == null
+        && ticket.statusHistory[0].to == 'Pending'
+        && ticket.statusHistory[0].changedAt is string
+        && ticket.statusHistory[0].changedAt.size() <= 40
+        && ticket.statusHistory[0].changedBy == ticket.ownerName;
+    }
+    function validTicketMessageFields(messageId) {
+      let message = request.resource.data;
+      return message.keys().hasAll(['id', 'ticketId', 'author', 'owner', 'isSupport', 'body', 'createdAt'])
+        && message.keys().hasOnly(['id', 'ticketId', 'author', 'owner', 'isSupport', 'body', 'createdAt'])
+        && message.id == messageId
+        && message.ticketId is string
+        && message.author is string
+        && message.author.size() > 0
+        && message.author.size() <= 200
+        && message.owner == request.auth.token.email
+        && message.isSupport is bool
+        && message.body is string
+        && message.body.size() > 0
+        && message.body.size() <= 10000
+        && message.createdAt == request.time;
+    }
+    function canCreateStudentTicketMessage(messageId) {
+      let message = request.resource.data;
+      let studentPath = /databases/$(database)/documents/students/$(request.auth.uid);
+      let ticketPath = /databases/$(database)/documents/tickets/$(message.get('ticketId', ''));
+      return isActiveStudent(request.auth.uid)
+        && request.auth.token.email_verified == true
+        && validTicketMessageFields(messageId)
+        && message.isSupport == false
+        && message.author == get(studentPath).data.name
+        && exists(ticketPath)
+        && get(ticketPath).data.owner == request.auth.token.email;
+    }
+    function canCreateAdminTicketMessage(messageId) {
+      let message = request.resource.data;
+      let ticketPath = /databases/$(database)/documents/tickets/$(message.get('ticketId', ''));
+      return isAdmin()
+        && validTicketMessageFields(messageId)
+        && message.isSupport == true
+        && exists(ticketPath);
+    }
+    function canReadStudentTicketMessage() {
+      let ticketPath = /databases/$(database)/documents/tickets/$(resource.data.get('ticketId', ''));
+      return isActiveStudent(request.auth.uid)
+        && resource.data.ticketId is string
+        && exists(ticketPath)
+        && get(ticketPath).data.owner == request.auth.token.email;
+    }
 
     match /students/{uid} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
-      allow update: if isAdmin() || (signedIn() && request.auth.uid == uid);
-      allow create: if signedIn() && request.auth.uid == uid;
-      allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow update: if isAdmin() || canUpdateStudentProfile(uid);
+      allow create: if canCreateStudentProfile(uid);
+      allow delete: if isAdmin() || isActiveStudent(uid);
+    }
+    match /deletedStudentAccounts/{uid} {
+      allow read, write: if isAdmin();
     }
     match /admins/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
     }
     match /articles/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false);
+      allow read: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.published == true && resource.data.archived == false);
       allow create, update, delete: if isAdmin();
     }
     match /faqs/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false);
+      allow read: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.published == true && resource.data.archived == false);
       allow create, update, delete: if isAdmin();
     }
     match /announcements/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.published == true && resource.data.archived == false && resource.data.publishedAt <= request.time);
+      allow read: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.published == true && resource.data.archived == false && resource.data.publishedAt <= request.time);
       allow create, update, delete: if isAdmin();
     }
     match /tickets/{id} {
-      allow create: if signedIn() && request.resource.data.owner == request.auth.token.email;
+      allow create: if canCreateTicket(id);
       allow read: if isAdmin() || owns(resource);
       allow update: if isAdmin() && request.resource.data.status in ['Pending', 'In Progress', 'Resolved', 'Closed'];
       allow delete: if isAdmin();
     }
     match /ticketMessages/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
-      allow create: if signedIn() && (isAdmin() || (request.resource.data.owner == request.auth.token.email && get(/databases/$(database)/documents/tickets/$(request.resource.data.ticketId)).data.owner == request.auth.token.email));
+      allow read: if isAdmin() || canReadStudentTicketMessage();
+      allow create: if canCreateAdminTicketMessage(id) || canCreateStudentTicketMessage(id);
       allow update, delete: if isAdmin();
     }
     match /ticketStatus/{id} {
-      allow read: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
+      allow read: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.owner == request.auth.token.email);
       allow create: if isAdmin();
       allow update, delete: if false;
     }
     match /notifications/{id} {
-      allow read, update: if signedIn() && resource.data.owner == request.auth.token.email;
+      allow read: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.owner == request.auth.token.email);
+      allow update: if isAdmin() || (isActiveStudent(request.auth.uid)
+        && resource.data.owner == request.auth.token.email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool);
       allow create: if isAdmin();
-      allow delete: if isAdmin() || (signedIn() && resource.data.owner == request.auth.token.email);
+      allow delete: if isAdmin() || (isActiveStudent(request.auth.uid) && resource.data.owner == request.auth.token.email);
     }
   }
 }

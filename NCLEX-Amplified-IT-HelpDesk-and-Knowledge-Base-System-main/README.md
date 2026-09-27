@@ -19,7 +19,8 @@ Open the forwarded Vite port. With no Firebase values, the app runs in local dem
 3. Copy the Web app configuration into `.env.local` using the keys in `.env.example`.
 4. Deploy `firestore.rules` with `firebase deploy --only firestore:rules`.
 5. Create administrator documents at `admins/{firebase-auth-uid}`. The document ID must be the authorized Firebase Auth UID. There is intentionally no public administrator registration.
-6. Firebase Auth is already used by the login, registration, verification, logout, and password-reset handlers when the environment values are present. The remaining ticket/content demo data uses local persistence until Firestore reads and writes are connected to the project collections. The fallback never stores passwords.
+6. Account deletion is Spark-compatible. Student self-deletion uses the Firebase client Auth SDK, then removes the own profile with the pre-captured ID token through the Firestore REST API because Auth deletion signs out the client. Admin deletion removes only the student profile and writes a restricted `deletedStudentAccounts/{uid}` marker so the remaining Auth user cannot recreate a profile and sign in. Ticket history and all other records are retained.
+7. Firebase Auth is already used by the login, registration, verification, logout, and password-reset handlers when the environment values are present. The remaining ticket/content demo data uses local persistence until Firestore reads and writes are connected to the project collections. The fallback never stores passwords.
 
 Administrator sign-in is intentionally unavailable until `.env.local` contains all six Firebase values and the administrator's Auth UID has a matching document in `admins/{uid}`. Never add Firebase values or administrator credentials to source control.
 

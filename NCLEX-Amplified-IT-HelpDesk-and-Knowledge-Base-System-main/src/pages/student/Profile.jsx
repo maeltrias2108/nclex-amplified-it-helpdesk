@@ -1,12 +1,13 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { UserRound, CheckCircle2, Pencil, Check, Mail, Shield, Phone, MapPin, KeyRound, UserX, Trash2, Camera } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { initials } from '../../data/seed';
-import { firebaseChangePassword, firebaseConfigured } from '../../firebase';
+import { firebaseChangePassword, firebaseConfigured, firebaseDeactivateCurrentStudent, firebaseDeleteCurrentStudentAccount, firebaseRequestEmailChange, firebaseSaveStudentProfile, firebaseErrorMessage } from '../../firebase';
 
 export function Profile({ session, updateSession, updateData, data, notify, setConfirm, logout }) {
   const [mode, setMode] = useState(null);
   const [displayName, setDisplayName] = useState(session.name || '');
+  const [emailAddress, setEmailAddress] = useState(session.email || '');
   const [details, setDetails] = useState({
     phone: session.phone || '',
     address: session.address || ''
@@ -16,9 +17,18 @@ export function Profile({ session, updateSession, updateData, data, notify, setC
 
   const isAdmin = session.role === 'admin';
 
-  const handleSave = (e) => {
+  useEffect(() => {
+    if (mode === 'details') return;
+    setDisplayName(session.name || '');
+    setEmailAddress(session.email || '');
+    setDetails({ phone: session.phone || '', address: session.address || '' });
+  }, [mode, session.address, session.email, session.name, session.phone]);
+
+  const handleSave = async (e) => {
     e.preventDefault();
     const val = displayName.trim();
+    const nextEmail = emailAddress.trim().toLowerCase();
+    const emailChanged = !isAdmin && nextEmail !== (session.email || '').toLowerCase();
     if (val.length < 2) {
       notify('Display name must contain at least 2 characters.', 'error');
       return;
@@ -28,16 +38,43 @@ export function Profile({ session, updateSession, updateData, data, notify, setC
       return;
     }
 
-    updateSession({ name: val, ...details });
-    if (!isAdmin) {
-      updateData('students', (data.students || []).map((student) =>
-        student.email.toLowerCase() === session.email.toLowerCase()
-          ? { ...student, name: val, ...details }
-          : student
-      ));
+    const profileChanges = { name: val, phone: details.phone.trim(), address: details.address.trim() };
+    try {
+      if (!isAdmin && firebaseConfigured) {
+        await firebaseSaveStudentProfile(profileChanges);
+      }
+
+      updateSession({
+        ...profileChanges,
+        ...(!isAdmin && !firebaseConfigured ? { email: nextEmail } : {})
+      });
+      if (!isAdmin) {
+        updateData('students', (data.students || []).map((student) =>
+          student.email.toLowerCase() === session.email.toLowerCase()
+            ? { ...student, ...profileChanges, ...(!firebaseConfigured ? { email: nextEmail } : {}) }
+            : student
+        ));
+      }
+
+      if (emailChanged && firebaseConfigured) {
+        try {
+          await firebaseRequestEmailChange(nextEmail);
+        } catch (error) {
+          setMode(null);
+          notify(`Profile details were saved, but the email verification request failed: ${error.message}`, 'error');
+          return;
+        }
+      }
+
+      setMode(null);
+      notify(emailChanged
+        ? firebaseConfigured
+          ? 'Profile details saved. Check the new email address to verify the change.'
+          : '[Demo Mode] Profile details and email were updated locally; no verification email was sent.'
+        : 'Account details updated successfully.');
+    } catch (error) {
+      notify(error.message || 'Account details could not be saved.', 'error');
     }
-    setMode(null);
-    notify('Account details updated successfully.');
   };
 
   const updateDetail = (event) => {
@@ -114,26 +151,45 @@ export function Profile({ session, updateSession, updateData, data, notify, setC
     setConfirm({
       title: isDelete ? 'Delete Your Account?' : 'Deactivate Your Account?',
       text: isDelete
-        ? 'This removes your student profile from the local account directory. Existing ticket history will be retained, but you will need to register again to access the portal.'
+        ? firebaseConfigured
+          ? 'This permanently deletes your Firebase sign-in and student profile. Existing ticket history will be retained.'
+          : 'This removes your student profile from the local account directory. Existing ticket history will be retained.'
         : 'This signs you out and prevents access to this student account until it is reactivated by an administrator.',
       confirmLabel: isDelete ? 'Delete Account' : 'Deactivate Account',
       isDanger: true,
-      action: () => {
+      action: async () => {
         if (isDelete) {
+          try {
+            if (firebaseConfigured) await firebaseDeleteCurrentStudentAccount();
+          } catch (error) {
+            if (error.code === 'auth/student-profile-cleanup-failed') {
+              await logout();
+              notify(firebaseErrorMessage(error), 'error');
+              return;
+            }
+            notify(firebaseErrorMessage(error), 'error');
+            return;
+          }
           updateData('students', (data.students || []).filter(
             (student) => student.email.toLowerCase() !== session.email.toLowerCase()
           ));
           notify('Your student account was deleted.');
         } else {
-          updateData('students', (data.students || []).map((student) =>
-            student.email.toLowerCase() === session.email.toLowerCase()
-              ? { ...student, active: false }
-              : student
-          ));
-          notify('Your student account was deactivated.');
+          try {
+            if (firebaseConfigured) await firebaseDeactivateCurrentStudent();
+            updateData('students', (data.students || []).map((student) =>
+              student.email.toLowerCase() === session.email.toLowerCase()
+                ? { ...student, active: false }
+                : student
+            ));
+            notify('Your student account was deactivated.');
+          } catch (error) {
+            notify(error.message || 'Your student account could not be deactivated.', 'error');
+            return;
+          }
         }
         setConfirm(null);
-        logout();
+        await logout();
       },
       onClose: () => setConfirm(null)
     });
@@ -213,6 +269,16 @@ export function Profile({ session, updateSession, updateData, data, notify, setC
               </label>
               {!isAdmin && (
                 <>
+                  <label className="field">
+                    <span className="field-label">Email Address</span>
+                    <input
+                      required
+                      type="email"
+                      value={emailAddress}
+                      onChange={(event) => setEmailAddress(event.target.value)}
+                      placeholder="Enter your email address"
+                    />
+                  </label>
                   <label className="field">
                     <span className="field-label">Contact Number</span>
                     <input name="phone" value={details.phone} onChange={updateDetail} placeholder="09XXXXXXXXX or +639XXXXXXXXX" inputMode="tel" />
