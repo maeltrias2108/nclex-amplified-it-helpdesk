@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
-import { Archive, RefreshCw, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Archive, RefreshCw, ArrowRight, ArrowLeft, Pencil, Trash2 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { SearchBox } from '../../components/common/SearchBox';
 import { EmptyState } from '../../components/common/EmptyState';
 import { normalizeCategory } from '../../category-config';
 import { firebaseErrorMessage } from '../../firebase';
 import { fmt } from '../../data/seed';
+import { richTextToPlainText } from '../../components/common/RichTextContent';
+import { formatManilaDateTime, isAnnouncementExpired } from '../../data/announcement-time';
 
 export function FirestoreArchiveManagement({
   data,
   setView,
+  setConfirm,
   updateData,
   notify,
-  updateContent
+  updateContent,
+  deleteContent
 }) {
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -24,17 +28,22 @@ export function FirestoreArchiveManagement({
 
   const archivedFaqs = (data.faqs || [])
     .filter((item) => item.archived === true || item.published === false)
-    .filter((item) => matches(`${item.question} ${item.answer} ${item.category}`));
+    .filter((item) => matches(`${item.question} ${richTextToPlainText(item.answer)} ${item.category}`));
 
   const archivedAnnouncements = (data.announcements || [])
     .filter((item) => item.archived === true || item.published === false)
-    .filter((item) => matches(`${item.title} ${item.summary} ${item.content}`));
+    .filter((item) => matches(`${item.title} ${item.summary} ${richTextToPlainText(item.content)}`));
 
   const closedTickets = (data.tickets || [])
     .filter((item) => ['Resolved', 'Closed'].includes(item.status))
     .filter((item) => matches(`${item.id} ${item.subject} ${item.ownerName} ${item.owner}`));
 
   const handleRestoreRecord = async (type, item) => {
+    if (type === 'announcements' && isAnnouncementExpired(item)) {
+      notify('Edit the expiration date to a future time before restoring this announcement.', 'error');
+      return;
+    }
+
     try {
       if (updateContent) {
         await updateContent(type, item.id, { archived: false, published: true });
@@ -48,6 +57,27 @@ export function FirestoreArchiveManagement({
     } catch (err) {
       notify(firebaseErrorMessage(err), 'error');
     }
+  };
+
+  const handleDeleteAnnouncement = (announcement) => {
+    setConfirm({
+      title: 'Delete this announcement?',
+      text: `This permanently deletes "${announcement.title}". No ticket history or other records will be affected.`,
+      confirmLabel: 'Delete Announcement',
+      isDanger: true,
+      action: async () => {
+        try {
+          if (deleteContent) await deleteContent('announcements', announcement.id);
+          updateData('announcements', (data.announcements || []).filter((item) => item.id !== announcement.id));
+          notify('Announcement permanently deleted.');
+        } catch (error) {
+          notify(firebaseErrorMessage(error), 'error');
+        } finally {
+          setConfirm(null);
+        }
+      },
+      onClose: () => setConfirm(null)
+    });
   };
 
   const renderGroup = (title, items, renderRow) => (
@@ -106,6 +136,24 @@ export function FirestoreArchiveManagement({
             <div className="archive-row-right">
               <button
                 type="button"
+                className="icon-button"
+                onClick={() => setView('admin-announcement-edit', { announcementId: item.id })}
+                aria-label={`Edit ${item.title}`}
+                title="Edit announcement"
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                type="button"
+                className="icon-button button-danger-icon"
+                onClick={() => handleDeleteAnnouncement(item)}
+                aria-label={`Delete ${item.title}`}
+                title="Delete announcement"
+              >
+                <Trash2 size={16} />
+              </button>
+              <button
+                type="button"
                 className="button button-sm button-secondary"
                 onClick={() => handleRestoreRecord('articles', item)}
               >
@@ -142,7 +190,7 @@ export function FirestoreArchiveManagement({
               <Archive size={16} className="archive-icon text-muted" />
               <div>
                 <strong>{item.title}</strong>
-                <small>Published {fmt(item.publishedAt || item.date)}</small>
+                <small>Published {formatManilaDateTime(item.publishedAt || item.date)}</small>
               </div>
             </div>
             <div className="archive-row-right">

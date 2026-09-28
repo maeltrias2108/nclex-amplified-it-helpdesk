@@ -2,12 +2,15 @@ import React from 'react';
 import { ArrowLeft, Calendar, Clock, Bell, User } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { EmptyState } from '../../components/common/EmptyState';
-import { fmtTime } from '../../data/seed';
+import { RichTextContent } from '../../components/common/RichTextContent';
+import { formatManilaDateTime, isAnnouncementActive } from '../../data/announcement-time';
+import { useAnnouncementClock } from '../../hooks/useAnnouncementClock';
 
 export function AnnouncementDetail({ data, setView, selected, admin = false }) {
+  const now = useAnnouncementClock(data.announcements);
   const item = data.announcements.find((a) => a.id === selected.announcementId);
 
-  if (!item) {
+  if (!item || (!admin && !isAnnouncementActive(item, now))) {
     return (
       <EmptyState
         title="Announcement Not Found"
@@ -41,12 +44,12 @@ export function AnnouncementDetail({ data, setView, selected, admin = false }) {
         <div className="announcement-meta-strip">
           <div className="meta-strip-item">
             <Calendar size={16} />
-            <span>Published: {fmtTime(pubDate)}</span>
+            <span>Published: {formatManilaDateTime(pubDate)}</span>
           </div>
           {expDate && (
             <div className="meta-strip-item">
               <Clock size={16} />
-              <span>Expires: {fmtTime(expDate)}</span>
+              <span>Expires: {formatManilaDateTime(expDate)}</span>
             </div>
           )}
           <div className="meta-strip-item">
@@ -61,11 +64,7 @@ export function AnnouncementDetail({ data, setView, selected, admin = false }) {
           </div>
         )}
 
-        <div className="announcement-body-full">
-          {item.content.split('\n\n').map((paragraph, i) => (
-            <p key={i}>{paragraph}</p>
-          ))}
-        </div>
+        <RichTextContent className="announcement-body-full" content={item.content} />
       </article>
     </div>
   );

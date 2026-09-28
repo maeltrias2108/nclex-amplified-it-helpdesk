@@ -3,27 +3,18 @@ import { Bell, Search, ArrowRight, RefreshCw, AlertCircle, Clock, Calendar } fro
 import { PageHeader } from '../../components/common/PageHeader';
 import { SearchBox } from '../../components/common/SearchBox';
 import { EmptyState } from '../../components/common/EmptyState';
-import { fmt, fmtTime } from '../../data/seed';
-
-export const isAnnouncementActive = (item) => {
-  if (!item.published || item.archived) return false;
-  const now = new Date();
-  const pubDate = new Date(item.publishedAt || item.date);
-  if (pubDate > now) return false; // Scheduled for future
-  if (item.expirationDate || item.expiresAt) {
-    const expDate = new Date(item.expirationDate || item.expiresAt);
-    if (expDate <= now) return false; // Expired
-  }
-  return true;
-};
+import { RichTextContent, richTextToPlainText } from '../../components/common/RichTextContent';
+import { formatManilaDateTime, isAnnouncementActive } from '../../data/announcement-time';
+import { useAnnouncementClock } from '../../hooks/useAnnouncementClock';
 
 export function Announcements({ data, setView, contentState }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const now = useAnnouncementClock(data.announcements);
 
-  const activeAnnouncements = data.announcements.filter(isAnnouncementActive);
+  const activeAnnouncements = data.announcements.filter((item) => isAnnouncementActive(item, now));
 
   const filtered = activeAnnouncements.filter((a) => {
-    const searchString = `${a.title} ${a.summary || ''} ${a.content} ${a.publisher || ''}`.toLowerCase();
+    const searchString = `${a.title} ${a.summary || ''} ${richTextToPlainText(a.content)} ${a.publisher || ''}`.toLowerCase();
     return searchString.includes(searchTerm.toLowerCase());
   });
 
@@ -86,7 +77,7 @@ export function Announcements({ data, setView, contentState }) {
                       {item.priority || 'Normal'} Priority
                     </span>
                     <span className="announcement-date">
-                      <Calendar size={14} /> {fmt(item.publishedAt || item.date)}
+                      <Calendar size={14} /> {formatManilaDateTime(item.publishedAt || item.date)}
                     </span>
                   </div>
                   <span className="announcement-author">
@@ -97,16 +88,14 @@ export function Announcements({ data, setView, contentState }) {
                 <h2 className="announcement-card-title">{item.title}</h2>
                 {item.summary && <p className="announcement-card-summary">{item.summary}</p>}
 
-                <div className="announcement-card-body">
-                  <p>{item.content}</p>
-                </div>
+                <RichTextContent className="announcement-card-body" content={item.content} />
 
                 <div className="announcement-card-footer">
                   <div className="announcement-expiry">
                     {(item.expirationDate || item.expiresAt) && (
                       <span>
                         <Clock size={13} /> Active until{' '}
-                        {fmt(item.expirationDate || item.expiresAt)}
+                        {formatManilaDateTime(item.expirationDate || item.expiresAt)}
                       </span>
                     )}
                   </div>

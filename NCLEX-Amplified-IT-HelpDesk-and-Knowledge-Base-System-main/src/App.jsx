@@ -219,7 +219,7 @@ export function App() {
           faqs: faqs.length
             ? faqs.map((f) => ({ ...f, published: f.published === true }))
             : current.faqs,
-          announcements: announcements.length ? announcements : current.announcements
+          announcements
         }));
         setContentState({ loading: false, error: null, loaded: true });
       })
@@ -278,9 +278,23 @@ export function App() {
       window.addEventListener('focus', syncStudentProfile);
     }
 
+    const announcementRefresh = window.setInterval(() => {
+      firebaseListContent('announcements', session.role !== 'admin')
+        .then((announcements) => {
+          if (active) {
+            setData((current) => ({
+              ...current,
+              announcements
+            }));
+          }
+        })
+        .catch(() => {});
+    }, 60_000);
+
     return () => {
       active = false;
       unsubscribeStudents?.();
+      window.clearInterval(announcementRefresh);
       if (session.role === 'student') window.removeEventListener('focus', syncStudentProfile);
     };
   }, [session?.role]);

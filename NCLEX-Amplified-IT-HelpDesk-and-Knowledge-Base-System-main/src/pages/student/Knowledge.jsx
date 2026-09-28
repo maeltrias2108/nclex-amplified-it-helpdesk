@@ -4,6 +4,7 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { SearchBox } from '../../components/common/SearchBox';
 import { CategoryCards } from '../../components/common/CategoryCards';
 import { EmptyState } from '../../components/common/EmptyState';
+import { richTextToPlainText } from '../../components/common/RichTextContent';
 import { normalizeCategory } from '../../category-config';
 import { fmt } from '../../data/seed';
 
@@ -16,7 +17,7 @@ export function Knowledge({ setView, data, contentState }) {
   const filtered = published.filter((article) => {
     const normCat = normalizeCategory(article.category);
     const matchesCategory = selectedCategory === 'All categories' || normCat === selectedCategory;
-    const searchString = `${article.title} ${article.summary} ${article.content} ${article.category}`.toLowerCase();
+    const searchString = `${article.title} ${article.summary} ${richTextToPlainText(article.content)} ${article.category}`.toLowerCase();
     const matchesSearch = searchString.includes(searchTerm.toLowerCase());
     return matchesCategory && matchesSearch;
   });

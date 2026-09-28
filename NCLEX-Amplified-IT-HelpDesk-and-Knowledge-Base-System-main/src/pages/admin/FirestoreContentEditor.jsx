@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
+import { richTextToPlainText, toSafeRichHtml } from '../../components/common/RichTextContent';
 import { CATEGORY_NAMES, normalizeCategory } from '../../category-config';
 import { firebaseErrorMessage } from '../../firebase';
+
+const RichTextEditor = lazy(() => import('../../components/common/RichTextEditor').then((module) => ({ default: module.RichTextEditor })));
 
 export function FirestoreContentEditor({
   type = 'articles',
@@ -54,8 +57,8 @@ export function FirestoreContentEditor({
   const submit = async (e) => {
     e.preventDefault();
     const requiredValues = isArticle
-      ? [form.title, form.summary, form.content]
-      : [form.question, form.answer];
+      ? [form.title, form.summary, richTextToPlainText(form.content)]
+      : [form.question, richTextToPlainText(form.answer)];
 
     if (requiredValues.some((v) => !String(v || '').trim())) {
       notify('Please complete all required fields before saving.', 'error');
@@ -68,6 +71,7 @@ export function FirestoreContentEditor({
       const now = new Date().toISOString();
       const payload = {
         ...form,
+        ...(isArticle ? { content: toSafeRichHtml(form.content) } : { answer: toSafeRichHtml(form.answer) }),
         category: normalizeCategory(form.category),
         published: form.published !== false,
         archived: form.archived === true
@@ -147,19 +151,19 @@ export function FirestoreContentEditor({
                 />
               </label>
 
-              <label className="field full-width">
+              <div className="field full-width">
                 <span className="field-label">
                   Article Content <i className="text-danger">*</i>
                 </span>
-                <textarea
-                  required
-                  rows={8}
-                  name="content"
-                  value={form.content}
-                  onChange={update}
-                  placeholder="Write clear, numbered step-by-step instructions..."
-                />
-              </label>
+                <Suspense fallback={<div className="rich-text-editor-loading" aria-busy="true" />}>
+                  <RichTextEditor
+                    label="Article Content"
+                    value={form.content}
+                    onChange={(content) => setForm((current) => ({ ...current, content }))}
+                    placeholder="Write clear, numbered step-by-step instructions..."
+                  />
+                </Suspense>
+              </div>
 
               <label className="field">
                 <span className="field-label">
@@ -199,19 +203,19 @@ export function FirestoreContentEditor({
                 />
               </label>
 
-              <label className="field full-width">
+              <div className="field full-width">
                 <span className="field-label">
                   Answer <i className="text-danger">*</i>
                 </span>
-                <textarea
-                  required
-                  rows={6}
-                  name="answer"
-                  value={form.answer}
-                  onChange={update}
-                  placeholder="Provide a concise and direct answer..."
-                />
-              </label>
+                <Suspense fallback={<div className="rich-text-editor-loading" aria-busy="true" />}>
+                  <RichTextEditor
+                    label="FAQ Answer"
+                    value={form.answer}
+                    onChange={(answer) => setForm((current) => ({ ...current, answer }))}
+                    placeholder="Provide a concise and direct answer..."
+                  />
+                </Suspense>
+              </div>
 
               <label className="field">
                 <span className="field-label">

@@ -13,8 +13,11 @@ import {
 import { PageHeader } from '../../components/common/PageHeader';
 import { SearchBox } from '../../components/common/SearchBox';
 import { EmptyState } from '../../components/common/EmptyState';
+import { RichTextContent, richTextToPlainText } from '../../components/common/RichTextContent';
 import { CATEGORY_NAMES, normalizeCategory } from '../../category-config';
 import { firebaseErrorMessage } from '../../firebase';
+import { formatManilaDateTime, isAnnouncementExpired } from '../../data/announcement-time';
+import { useAnnouncementClock } from '../../hooks/useAnnouncementClock';
 
 const CONTENT_TYPE_CONFIG = {
   articles: {
@@ -55,11 +58,17 @@ export function FirestoreContentManager({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All categories');
   const [expandedFaqId, setExpandedFaqId] = useState(null);
+  const announcementNow = useAnnouncementClock(type === 'announcements' ? data.announcements : []);
 
   const items = (data[config.itemsKey] || []).filter((item) => {
+    if (type === 'announcements' && isAnnouncementExpired(item, announcementNow)) return false;
     const norm = normalizeCategory(item.category);
     const matchesCat = selectedCategory === 'All categories' || norm === selectedCategory;
-    const searchString = JSON.stringify(item).toLowerCase();
+    const searchString = JSON.stringify({
+      ...item,
+      content: richTextToPlainText(item.content),
+      answer: richTextToPlainText(item.answer)
+    }).toLowerCase();
     return matchesCat && searchString.includes(searchTerm.toLowerCase());
   });
 
@@ -199,6 +208,9 @@ export function FirestoreContentManager({
             {items.map((item) => {
               const isPublished = item.published !== false;
               const isArchived = item.archived === true;
+              const scheduledAt = new Date(item.publishedAt || item.date).getTime();
+              const isScheduled = type === 'announcements' && isPublished && !isArchived
+                && Number.isFinite(scheduledAt) && scheduledAt > announcementNow;
               const titleText = item.title || item.question;
 
               return (
@@ -253,10 +265,10 @@ export function FirestoreContentManager({
 
                     <button
                       type="button"
-                      className={`button button-sm publish-toggle ${isPublished ? 'is-published' : 'is-unpublished'}`}
+                      className={`button button-sm publish-toggle ${isScheduled ? 'is-scheduled' : isPublished ? 'is-published' : 'is-unpublished'}`}
                       onClick={() => handleTogglePublish(item)}
                     >
-                      {isPublished ? 'Published' : 'Unpublished'}
+                      {isScheduled ? `Scheduled · ${formatManilaDateTime(item.publishedAt || item.date)}` : isPublished ? 'Published' : 'Unpublished'}
                     </button>
 
                     <button
@@ -279,7 +291,7 @@ export function FirestoreContentManager({
 
                   {type === 'faqs' && expandedFaqId === item.id && (
                     <div className="faq-manager-preview">
-                      <p>{item.answer}</p>
+                      <RichTextContent content={item.answer} />
                     </div>
                   )}
                 </div>

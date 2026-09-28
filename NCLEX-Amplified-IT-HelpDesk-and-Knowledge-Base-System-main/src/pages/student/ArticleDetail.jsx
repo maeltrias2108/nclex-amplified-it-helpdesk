@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { BookOpen, ArrowLeft, ArrowRight, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
 import { EmptyState } from '../../components/common/EmptyState';
+import { RichTextContent, richTextToPlainText } from '../../components/common/RichTextContent';
 import { normalizeCategory } from '../../category-config';
 import { fmt, readStore, writeStore } from '../../data/seed';
 
@@ -39,7 +40,7 @@ export function ArticleDetail({ setView, data, selected, admin = false }) {
       item.published &&
       !item.archived &&
       (contextCategory === 'All categories' || norm === contextCategory) &&
-      `${item.title} ${item.summary} ${item.content}`.toLowerCase().includes(contextQuery.toLowerCase())
+      `${item.title} ${item.summary} ${richTextToPlainText(item.content)}`.toLowerCase().includes(contextQuery.toLowerCase())
     );
   });
 
@@ -97,11 +98,7 @@ export function ArticleDetail({ setView, data, selected, admin = false }) {
           <p>{article.summary}</p>
         </div>
 
-        <div className="article-main-text">
-          {article.content.split('\n\n').map((paragraph, idx) => (
-            <p key={idx}>{paragraph}</p>
-          ))}
-        </div>
+        <RichTextContent className="article-main-text" content={article.content} />
 
         {!admin && <div className="article-feedback-card">
           <div className="feedback-question">

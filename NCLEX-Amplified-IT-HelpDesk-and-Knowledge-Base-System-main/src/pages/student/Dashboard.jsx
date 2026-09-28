@@ -13,9 +13,11 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
+import { richTextToPlainText } from '../../components/common/RichTextContent';
 import { EmptyState } from '../../components/common/EmptyState';
-import { isAnnouncementActive } from './Announcements';
 import { fmt, initials } from '../../data/seed';
+import { formatManilaDateTime, isAnnouncementActive } from '../../data/announcement-time';
+import { useAnnouncementClock } from '../../hooks/useAnnouncementClock';
 
 function timeGreeting() {
   const hour = new Date().getHours();
@@ -23,6 +25,8 @@ function timeGreeting() {
 }
 
 export function Dashboard({ setView, data, session }) {
+  const announcementNow = useAnnouncementClock(data.announcements);
+  const activeAnnouncements = data.announcements.filter((announcement) => isAnnouncementActive(announcement, announcementNow));
   const userEmail = session.email.toLowerCase();
   const mine = data.tickets.filter((t) => t.owner?.toLowerCase() === userEmail);
 
@@ -139,7 +143,7 @@ export function Dashboard({ setView, data, session }) {
           </div>
 
           <div className="dashboard-list">
-            {data.announcements.filter(isAnnouncementActive).slice(0, 2).map((a) => (
+            {activeAnnouncements.slice(0, 2).map((a) => (
               <button
                 type="button"
                 className="dashboard-announcement-card"
@@ -151,15 +155,15 @@ export function Dashboard({ setView, data, session }) {
                 </div>
                 <div className="announcement-summary-wrap">
                   <strong className="announcement-title">{a.title}</strong>
-                  <p className="announcement-snippet">{a.summary || a.content?.slice(0, 85)}...</p>
+                  <p className="announcement-snippet">{a.summary || richTextToPlainText(a.content).slice(0, 85)}...</p>
                   <small className="announcement-meta">
-                    {fmt(a.publishedAt || a.date)} &bull; {a.publisher || 'IT Support Team'}
+                    {formatManilaDateTime(a.publishedAt || a.date)} &bull; {a.publisher || 'IT Support Team'}
                   </small>
                 </div>
                 <ArrowRight size={16} className="row-arrow" />
               </button>
             ))}
-            {!data.announcements.filter(isAnnouncementActive).length && (
+            {!activeAnnouncements.length && (
               <p className="empty-inline-text">No announcements at this time.</p>
             )}
           </div>

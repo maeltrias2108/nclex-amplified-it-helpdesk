@@ -4,6 +4,7 @@ import { PageHeader } from '../../components/common/PageHeader';
 import { SearchBox } from '../../components/common/SearchBox';
 import { CategoryCards } from '../../components/common/CategoryCards';
 import { EmptyState } from '../../components/common/EmptyState';
+import { RichTextContent, richTextToPlainText } from '../../components/common/RichTextContent';
 import { normalizeCategory } from '../../category-config';
 
 export function FAQ({ data, contentState, selected, admin = false }) {
@@ -21,7 +22,7 @@ export function FAQ({ data, contentState, selected, admin = false }) {
   const filtered = published.filter((faq) => {
     const norm = normalizeCategory(faq.category);
     const matchesCategory = selectedCategory === 'All categories' || norm === selectedCategory;
-    const searchString = `${faq.question} ${faq.answer} ${faq.category}`.toLowerCase();
+    const searchString = `${faq.question} ${richTextToPlainText(faq.answer)} ${faq.category}`.toLowerCase();
     const matchesSearch = searchString.includes(searchTerm.toLowerCase());
     return matchesCategory && matchesSearch;
   });
@@ -104,7 +105,7 @@ export function FAQ({ data, contentState, selected, admin = false }) {
 
                 {isOpen && (
                   <div className="faq-answer-content">
-                    <p>{faq.answer}</p>
+                    <RichTextContent content={faq.answer} />
                   </div>
                 )}
               </div>

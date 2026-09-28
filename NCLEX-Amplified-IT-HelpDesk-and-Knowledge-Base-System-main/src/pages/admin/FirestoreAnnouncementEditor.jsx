@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import { PageHeader } from '../../components/common/PageHeader';
+import { richTextToPlainText, toSafeRichHtml } from '../../components/common/RichTextContent';
 import { firebaseErrorMessage } from '../../firebase';
+import { fromManilaDateTimeInput, toManilaDateTimeInput, validateAnnouncementTimes } from '../../data/announcement-time';
+
+const RichTextEditor = lazy(() => import('../../components/common/RichTextEditor').then((module) => ({ default: module.RichTextEditor })));
 
 export function FirestoreAnnouncementEditor({
   data,
@@ -15,17 +19,6 @@ export function FirestoreAnnouncementEditor({
   const existingId = selected?.announcementId;
   const existing = (data.announcements || []).find((a) => a.id === existingId);
 
-  const formatForDateInput = (val) => {
-    if (!val) return '';
-    try {
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return '';
-      return d.toISOString().slice(0, 16);
-    } catch {
-      return '';
-    }
-  };
-
   const [form, setForm] = useState(
     existing
       ? {
@@ -34,10 +27,15 @@ export function FirestoreAnnouncementEditor({
           content: existing.content || '',
           priority: existing.priority || 'Normal',
           publisher: existing.publisher || 'IT Support Team',
-          publishedAt: formatForDateInput(existing.publishedAt || existing.date) || new Date().toISOString().slice(0, 16),
-          expirationDate: formatForDateInput(existing.expirationDate || existing.expiresAt) || '',
+          publishedAt: toManilaDateTimeInput(existing.publishedAt || existing.date),
+          expirationDate: existing.expirationDate || existing.expiresAt
+            ? toManilaDateTimeInput(existing.expirationDate || existing.expiresAt)
+            : '',
           published: existing.published !== false,
-          archived: existing.archived === true
+          archived: existing.archived === true,
+          instantPublish: false,
+          publishedAtEdited: false,
+          expirationDateEdited: false
         }
       : {
           title: '',
@@ -45,35 +43,67 @@ export function FirestoreAnnouncementEditor({
           content: '',
           priority: 'Normal',
           publisher: 'IT Support Team',
-          publishedAt: new Date().toISOString().slice(0, 16),
+          publishedAt: toManilaDateTimeInput(),
           expirationDate: '',
           published: true,
-          archived: false
+          archived: false,
+          instantPublish: true,
+          publishedAtEdited: false,
+          expirationDateEdited: false
         }
   );
 
   const [saving, setSaving] = useState(false);
 
-  const update = (e) =>
-    setForm({
-      ...form,
-      [e.target.name]: e.target.type === 'checkbox' ? e.target.checked : e.target.value
-    });
+  const update = (event) => {
+    const { name, type, value, checked } = event.target;
+    if (name === 'published') {
+      setForm((current) => {
+        if (!checked) return { ...current, published: false, instantPublish: false };
+        const requestedTime = fromManilaDateTimeInput(current.publishedAt);
+        const instantPublish = !requestedTime || requestedTime.getTime() <= Date.now();
+        return {
+          ...current,
+          published: true,
+          instantPublish,
+          ...(instantPublish ? {
+            publishedAt: toManilaDateTimeInput(),
+            publishedAtEdited: true
+          } : {})
+        };
+      });
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      [name]: type === 'checkbox' ? checked : value,
+      ...(name === 'publishedAt'
+        ? {
+          instantPublish: current.published && value === toManilaDateTimeInput(),
+          publishedAtEdited: true
+        }
+        : name === 'expirationDate' ? { expirationDateEdited: true } : {})
+    }));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.content.trim() || !form.publishedAt) {
+    if (!form.title.trim() || !richTextToPlainText(form.content) || !form.publishedAt) {
       notify('Title, content, and publish date are required.', 'error');
       return;
     }
 
-    if (form.expirationDate) {
-      const pubD = new Date(form.publishedAt);
-      const expD = new Date(form.expirationDate);
-      if (expD <= pubD) {
-        notify('Expiration date must be later than the publish date.', 'error');
-        return;
-      }
+    const validatedDates = validateAnnouncementTimes({
+      publishedAt: form.publishedAt,
+      expirationDate: form.expirationDate,
+      instantPublish: form.published && form.instantPublish,
+      preservedPublishedAt: existing && !form.publishedAtEdited ? existing.publishedAt || existing.date : null,
+      preservedExpirationDate: existing && !form.expirationDateEdited ? existing.expirationDate || existing.expiresAt : null
+    });
+    if (validatedDates.error) {
+      notify(validatedDates.error, 'error');
+      return;
     }
 
     setSaving(true);
@@ -83,11 +113,11 @@ export function FirestoreAnnouncementEditor({
       const payload = {
         title: form.title.trim(),
         summary: form.summary.trim(),
-        content: form.content.trim(),
+        content: toSafeRichHtml(form.content),
         priority: form.priority,
         publisher: form.publisher.trim() || 'IT Support Team',
-        publishedAt: new Date(form.publishedAt).toISOString(),
-        expirationDate: form.expirationDate ? new Date(form.expirationDate).toISOString() : null,
+        publishedAt: validatedDates.publishedAt,
+        expirationDate: validatedDates.expirationDate,
         published: form.published !== false,
         archived: form.archived === true
       };
@@ -119,6 +149,11 @@ export function FirestoreAnnouncementEditor({
       setSaving(false);
     }
   };
+
+  const publicationTime = form.instantPublish ? new Date() : fromManilaDateTimeInput(form.publishedAt);
+  const expirationMin = toManilaDateTimeInput(
+    new Date(Math.max(Date.now(), publicationTime?.getTime() || 0))
+  );
 
   return (
     <div className="page-container announcement-editor-page">
@@ -161,19 +196,19 @@ export function FirestoreAnnouncementEditor({
             />
           </label>
 
-          <label className="field full-width">
+          <div className="field full-width">
             <span className="field-label">
               Full Announcement Content <i className="text-danger">*</i>
             </span>
-            <textarea
-              required
-              rows={7}
-              name="content"
-              value={form.content}
-              onChange={update}
-              placeholder="Detailed explanation of the announcement, schedules, affected systems..."
-            />
-          </label>
+            <Suspense fallback={<div className="rich-text-editor-loading" aria-busy="true" />}>
+              <RichTextEditor
+                label="Full Announcement Content"
+                value={form.content}
+                onChange={(content) => setForm((current) => ({ ...current, content }))}
+                placeholder="Detailed explanation of the announcement, schedules, affected systems..."
+              />
+            </Suspense>
+          </div>
 
           <label className="field">
             <span className="field-label">
@@ -184,6 +219,7 @@ export function FirestoreAnnouncementEditor({
               type="datetime-local"
               name="publishedAt"
               value={form.publishedAt}
+              min={toManilaDateTimeInput()}
               onChange={update}
             />
           </label>
@@ -194,6 +230,7 @@ export function FirestoreAnnouncementEditor({
               type="datetime-local"
               name="expirationDate"
               value={form.expirationDate}
+              min={expirationMin}
               onChange={update}
             />
           </label>

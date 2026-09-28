@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "announcements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "archived", "order": "ASCENDING" },
+        { "fieldPath": "expirationDate", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
