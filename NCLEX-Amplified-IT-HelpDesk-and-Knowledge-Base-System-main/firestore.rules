@@ -58,26 +58,41 @@ service cloud.firestore {
         && request.auth.token.email_verified == true
         && exists(studentPath)
         && get(studentPath).data.active == true
-        && ticket.keys().hasAll(['id', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory'])
-        && ticket.keys().hasOnly(['id', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory'])
+        && ticket.keys().hasAll(['id', 'ownerUid', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory'])
+        && ticket.keys().hasOnly(['id', 'ownerUid', 'owner', 'ownerName', 'subject', 'category', 'priority', 'description', 'platform', 'attachment', 'attachments', 'status', 'createdAt', 'updatedAt', 'assignee', 'statusHistory', 'manuallyArchived'])
         && ticket.id == ticketId
+        && ticket.ownerUid == request.auth.uid
         && ticket.owner == request.auth.token.email
         && ticket.ownerName == get(studentPath).data.name
         && ticket.subject is string
         && ticket.subject.size() >= 5
         && ticket.subject.size() <= 120
-        && ticket.category in ['Account & Dashboard Access', 'Studium CAT & QBanks', 'Learning Materials & Handouts', 'Classes & Zoom', 'Video & Playback Issues', 'Website, Browser & Network Issues', 'Forms & File Uploads', 'NCLEX Registration & External Platforms', 'Pricing & Subscriptions', 'Email & Communication', 'General Inquiries & Technical Support']
+        && ticket.category in ['Account & Dashboard Access', 'Studium CAT & QBanks', 'Learning Materials & Handouts', 'Classes & Zoom', 'Video & Playback Issues', 'Website, Browser & Network Issues', 'Forms & File Uploads', 'NCLEX Registration & External Platforms', 'Pricing & Subscriptions', 'Email & Communication', 'General Inquiries & Technical Support', 'Other']
         && ticket.priority in ['Low', 'Normal', 'High']
         && ticket.description is string
         && ticket.description.size() >= 15
         && ticket.description.size() <= 4000
         && ticket.platform is string
         && ticket.platform.size() <= 200
-        && ticket.attachment == null
         && ticket.attachments is list
-        && ticket.attachments.size() == 0
+        && ticket.attachments.size() <= 10
+        && ((ticket.attachments.size() == 0 && ticket.attachment == null)
+          || (ticket.attachments.size() > 0
+            && ticket.attachments[0] is map
+            && ticket.attachments[0].keys().hasAll(['name', 'type', 'size', 'path'])
+            && ticket.attachments[0].keys().hasOnly(['name', 'type', 'size', 'path'])
+            && ticket.attachments[0].name is string
+            && ticket.attachments[0].name.size() <= 255
+            && ticket.attachment == ticket.attachments[0]
+            && ticket.attachments[0].path is string
+            && ticket.attachments[0].path.matches('^ticketAttachments/' + request.auth.uid + '/' + ticketId + '/.*$')
+            && ticket.attachments[0].type is string
+            && ticket.attachments[0].type.matches('^image/.*$')
+            && ticket.attachments[0].size is number
+            && ticket.attachments[0].size <= 5242880))
         && ticket.status == 'Pending'
         && ticket.assignee == 'Support Desk Queue'
+        && ticket.manuallyArchived == false
         && ticket.createdAt == request.time
         && ticket.updatedAt == request.time
         && ticket.statusHistory is list
@@ -117,7 +132,8 @@ service cloud.firestore {
         && message.isSupport == false
         && message.author == get(studentPath).data.name
         && exists(ticketPath)
-        && get(ticketPath).data.owner == request.auth.token.email;
+        && get(ticketPath).data.owner == request.auth.token.email
+        && get(ticketPath).data.status in ['Pending', 'In Progress'];
     }
     function canCreateAdminTicketMessage(messageId) {
       let message = request.resource.data;
@@ -125,7 +141,8 @@ service cloud.firestore {
       return isAdmin()
         && validTicketMessageFields(messageId)
         && message.isSupport == true
-        && exists(ticketPath);
+        && exists(ticketPath)
+        && get(ticketPath).data.status in ['Pending', 'In Progress'];
     }
     function canReadStudentTicketMessage() {
       let ticketPath = /databases/$(database)/documents/tickets/$(resource.data.get('ticketId', ''));
@@ -133,6 +150,25 @@ service cloud.firestore {
         && resource.data.ticketId is string
         && exists(ticketPath)
         && get(ticketPath).data.owner == request.auth.token.email;
+    }
+    function canUpdateAdminTicket() {
+      return resource != null
+        && isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'statusHistory', 'manuallyArchived', 'assignee'])
+        && request.resource.data.status in ['Pending', 'In Progress', 'Resolved', 'Closed']
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.statusHistory is list
+        && request.resource.data.get('manuallyArchived', false) is bool
+        && request.resource.data.get('assignee', 'Support Desk Queue') is string;
+    }
+    function canUpdateOwnTicket(uid) {
+      return resource != null
+        && owns(resource)
+        && isActiveStudent(uid)
+        && ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['studentHidden']) && request.resource.data.studentHidden == true)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+            && request.resource.data.updatedAt == request.time
+            && resource.data.status in ['Pending', 'In Progress']));
     }
 
     match /students/{uid} {
@@ -163,7 +199,7 @@ service cloud.firestore {
     match /tickets/{id} {
       allow create: if canCreateTicket(id);
       allow read: if isAdmin() || owns(resource);
-      allow update: if isAdmin() && request.resource.data.status in ['Pending', 'In Progress', 'Resolved', 'Closed'];
+      allow update: if canUpdateAdminTicket() || canUpdateOwnTicket(request.auth.uid);
       allow delete: if isAdmin();
     }
     match /ticketMessages/{id} {
